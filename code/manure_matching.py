@@ -35,9 +35,6 @@ TjF=0  		#$			 (fixed cost of synthetic fertilizer)
 trucking_rate=0.008995 	#$/ mi/ lb N
 PiV=0  					#(cost of treating manure for crop application)
 PjV=0.63   	#$/lb N  	 (cost of being able to apply manure)
-PiF=0 			#(fixed cost of being able to treat manure for crop application)
-PjF=0 			#(fixed cost of being able apply manure for crop application)
-cF=0 			#(fixed cost of establishing manure shipment between a source and a sink)
 
 #---------------------- MAIN ----------------------
 
@@ -52,7 +49,7 @@ if rebuild:
 	county_distances = pd.read_csv(data_dir+ county_distances_filename)
 	supply_demand=supply_demand.merge(county_coord[['FIPS','lat','lon']])
 	supply_demand['coord'] = list(zip(supply_demand.lat, supply_demand.lon))
-	if state is not None:
+	if state is not None:   #select case study states
 		supply_demand=supply_demand[supply_demand['state'].isin(state)]
 
 	# Check for counties not in the supply_demand dataset
@@ -70,7 +67,6 @@ if rebuild:
 						'BalanceN_Tons': 'N_Balance_2', "BalanceP2O5_Tons":"P_Balance_2"})
 	county_distances['N_Balance_2'].replace('', np.nan, inplace=True)
 	county_distances.dropna(subset=['N_Balance_2'], inplace=True)
-	# print(county_distances.loc[(county_distances['county1'] == 48295) & (county_distances['county2'] == 48387)])
 	county_distances=county_distances.loc[(county_distances[nutrient+"_Balance_1"] >= 0) 
 						& (county_distances[nutrient+"_Balance_2"] < 0)]
 
@@ -113,8 +109,6 @@ model.PjV=pyo.Param(initialize=PjV)
 model.PiV=pyo.Param(initialize=PiV)
 model.TjF=pyo.Param(initialize=TjF)
 model.TiF=pyo.Param(initialize=TiF)
-model.PjF=pyo.Param(initialize=PjF)
-model.PiF=pyo.Param(initialize=PiF)
 
 # Compute variable costs
 cV={}
@@ -123,14 +117,10 @@ for i in model.I_plus:
 		dist=county_distances.query('county1 =='+str(i)+ " and county2 =="+str(j))["mi_to_county"].values[0]
 		cV[i,j]=trucking_rate*dist
 model.cV=pyo.Param(model.I_plus, model.I_minus, initialize=cV)
-# model.cF=pyo.Param(model.I_plus, model.I_minus, initialize=cF)
 
 # Variables
 model.x=pyo.Var(model.I_plus, model.I_minus, bounds=(0,None)) 
-# model.y=pyo.Var(model.I_plus, model.I_minus, within=pyo.Binary) 
-# model.w=pyo.Var(model.I, within=pyo.Binary) 
 model.z=pyo.Var(model.I, bounds=(0,None)) 
-# model.q=pyo.Var(model.I, within=pyo.Binary) 
 model.q=pyo.Var(model.I_plus, within=pyo.Binary) 
 
 # Constraints
@@ -142,25 +132,9 @@ def sink_mass_balance_rule(m, j):
 	return sum(m.x[i, j] for i in m.I_plus) + m.z[j] == m.d[j]
 model.sink_mass_balance= pyo.Constraint(model.I_minus, rule=sink_mass_balance_rule)
 
-# def supply_binary_rule(m, i, j):
-# 	return sum(m.x[i, j] for j in model.I_minus) <= m.s[i]*m.w[i]
-# model.supply_binary= pyo.Constraint(model.I_plus, rule=supply_binary_rule)
-
-# def demand_binary_rule(m, i, j):
-# 	return sum(m.x[i, j] for i in model.I_plus) <= m.d[j]*m.w[j]
-# model.demand_binary= pyo.Constraint(model.I_minus, rule=demand_binary_rule)
-
-# def transport_binary_rule(m, i, j):
-# 	return m.x[i, j] <= min(m.s[i], m.d[j])*m.y[i, j]
-# model.transport_binary= pyo.Constraint(model.I_plus, model.I_minus, rule=transport_binary_rule)
-
 def excess_supply_binary_rule(m, i):
 	return m.z[i] <= m.s[i]*m.q[i]
 model.excess_supply_binary= pyo.Constraint(model.I_plus, rule=excess_supply_binary_rule)
-
-# def unmet_demand_binary_rule(m, j):
-# 	return m.z[j] <= m.d[j]*m.q[j]
-# model.unmet_demand_binary= pyo.Constraint(model.I_minus, rule=unmet_demand_binary_rule)
 
 def obj_rule(m):
 	return  (sum(sum(m.cV[i,j]*m.x[i,j] for j in m.I_minus) for i in m.I_plus) 
